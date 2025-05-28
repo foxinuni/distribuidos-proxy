@@ -1,0 +1,14 @@
+version: '3'
+tasks:
+  sqlc:
+    cmds:
+      - sqlc generate
+  build:
+    cmds:
+      - go build -o build/ ./...
+  migrate:
+    cmds:
+      - migrate -source file:migrations -database "${DATABASE_URL}" up
+  migrate-down:
+    cmds:
+      - migrate -source file:migrations -database "${DATABASE_URL}" down

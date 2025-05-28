@@ -1,0 +1,56 @@
+package main
+
+import (
+	"flag"
+	"os"
+	"os/signal"
+	"runtime"
+
+	"github.com/foxinuni/distribuidos-proxy/internal/handler"
+	"github.com/foxinuni/distribuidos-proxy/internal/services"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
+)
+
+var config Config
+
+func init() {
+	// Load config from flags
+	flag.IntVar(&config.Port, "port", 5555, "Port to listen on")
+	flag.IntVar(&config.Workers, "workers", runtime.NumCPU(), "Number of worker goroutines")
+	flag.Parse()
+
+	// Set up zerolog logger for debug and pretty print
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	zerolog.SetGlobalLevel(zerolog.DebugLevel)
+}
+
+func main() {
+	// 1. Construct services for server
+	serializerService := services.NewJsonModelSerializer()
+
+	// 2. Boostrap the proxy
+	proxy := handler.NewServer(
+		serializerService,
+
+		// Optional server options
+		handler.WithPort(config.Port),
+		handler.WithWorkerCount(config.Workers),
+		handler.WithServers(
+			"tcp://192.168.0.102:5556",
+			"tcp://192.168.0.102:5557",
+		),
+	)
+
+	// 5. Start the server
+	if err := proxy.Start(); err != nil {
+		log.Error().Err(err).Msg("Failed to start server")
+		os.Exit(1)
+	}
+	defer proxy.Stop()
+
+	// 6. Wait for shutdown signal (CTRL+C)
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, os.Interrupt)
+	<-signalChan
+}
