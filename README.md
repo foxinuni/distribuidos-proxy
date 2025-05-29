@@ -1,80 +1,35 @@
 # Central y Facultades
 
-El siguiente código compila los programas de la central y las facultades.  
-En este caso, la manera más fácil de compilar es a través de Docker.
+Este repositorio contiene el código del proxy utilizado como Load Balancer y Health Checker. Es sencillo de ejecutar y compatible con Windows.
 
-### Dependencias
+## Dependencias
 
-- **libsodium, libczmq, libzmq:** Librerías dependencias para ZeroMQ en Golang.
 - **sqlc:** Generador de código a partir de esquemas SQL.
-- **migrate:** Gestionador de migraciones para base de datos.
-- **go-task:** Herramienta de compilación.
-- **go:** Lenguaje de programación utilizado.
+- **migrate:** Gestor de migraciones para bases de datos.
+- **go-task:** Herramienta de automatización de tareas.
+- **go:** Lenguaje de programación principal.
 
-> **Importante:** No es necesario instalar ninguna de estas dependencias al ejecutar desde Docker.  
-> Docker instala todas las dependencias necesarias para correr el proyecto, independientemente del sistema operativo.
+> **Nota:** No es necesario instalar estas dependencias si ejecutas el proyecto con Docker.  
+> Docker instalará automáticamente todo lo necesario, sin importar tu sistema operativo.
 
-### Compilación
+## Compilación
 
-Para compilar el programa, como se mencionó anteriormente, se necesita tener Docker instalado en la máquina.  
-Docker se puede instalar desde su página oficial: [https://www.docker.com](https://www.docker.com).
+Para compilar el programa, asegúrate de tener Docker instalado.  
+Puedes descargarlo desde: [https://www.docker.com](https://www.docker.com).
 
-1. Abre una terminal dentro de la carpeta del proyecto:
+1. Abre una terminal en la carpeta del proyecto:
     ```sh
     cd distribuidos-central
     ```
-2. Construye la imagen que contiene los binarios (esto puede tardar unos minutos):
+2. Construye la imagen Docker (esto puede tardar unos minutos):
     ```sh
-    # "dist-tools" es el nombre de la imagen a crear
-    docker build -t dist-tools .
+    # "dist-proxy" es el nombre de la imagen a crear
+    docker build -t dist-proxy .
     ```
 
-A partir de este momento, tienes a tu disposición una serie de binarios y utilidades para desplegar los servicios.  
-Cada uno de estos binarios tiene parámetros configurables, garantizando portabilidad. Los binarios son los siguientes:
-
-#### 1. migrate
-
-Permite migrar los esquemas que inicializan la base de datos.
-
-```sh
-# La URL de la base de datos debe seguir el estándar de Postgres.
-# Ejemplo: postgres://user:password@127.0.0.1/db?sslmode=disable
-docker run --rm \
-  --network host \
-  -e DATABASE_URL=${DATABASE_URL} \
-  dist-tools task migrate
-```
-
-#### 2. populate
-
-Llena la base de datos con salones y laboratorios.
-
-```sh
-# Se puede cambiar el número de salones de cada tipo cambiando los parámetros.
-docker run --rm \
-  --network host \
-  dist-tools populate -classrooms 350 -laboratories 100 -database ${DATABASE_URL}
-```
-
-#### 3. central
-
-Inicia el servidor central.
-
-```sh
-# Si no se especifica el número de trabajadores se utiliza el número de cores de la máquina.
-docker run --rm \
-  --network host \
-  dist-tools central -port 5555 -workers 20 -database ${DATABASE_URL}
-```
-
-#### 4. faculty
-
-Inicia la prueba de facultades.
-
-```sh
-# Es importante dar la dirección del servidor central en el formato: tcp://[ip]:[puerto]
-docker run --rm \
-  --network host \
-  -v ./logs/:/app/logs \
-  dist-tools faculty -faculties 10 -address tcp://127.0.0.1:5555
-```
+3. Ejecuta el proxy:
+    ```sh
+    docker run --rm \
+      --network host \
+      dist-proxy proxy -port 4444 -workers 10
+    ```
