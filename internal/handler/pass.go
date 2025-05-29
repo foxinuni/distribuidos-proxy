@@ -133,8 +133,12 @@ func (p *Proxy) handleServer(server *Server) {
 }
 
 func (s *Proxy) getDealerForConnection(identity string) (zmq4.Socket, error) {
+	s.mutex.Lock()
+	conn, exists := s.connections[identity]
+	s.mutex.Unlock()
+
 	// Check if conn exists and server is alive
-	if conn, exists := s.connections[identity]; exists {
+	if exists {
 		// Find the server associated with this identity
 		for _, server := range s.servers {
 			if server.Address == conn.Address {
@@ -156,22 +160,25 @@ func (s *Proxy) getDealerForConnection(identity string) (zmq4.Socket, error) {
 	// Find a server to connect to
 	for _, server := range s.servers {
 		server.Mutex.Lock()
+		alive := server.Alive
+		server.Mutex.Unlock()
 
-		if server.Alive {
-			dealer := zmq4.NewDealer(context.Background(),
+		if alive {
+			dealer := zmq4.NewDealer(s.ctx,
 				zmq4.WithTimeout(s.deathtime),
 				zmq4.WithDialerTimeout(s.deathtime),
-				zmq4.WithDialerMaxRetries(-1),
 			)
 
 			if err := dealer.Dial(server.Address); err != nil {
 				continue
 			}
 
+			s.mutex.Lock()
 			s.connections[identity] = Connection{
 				Address: server.Address,
 				Dealer:  dealer,
 			}
+			s.mutex.Unlock()
 
 			return dealer, nil
 		}

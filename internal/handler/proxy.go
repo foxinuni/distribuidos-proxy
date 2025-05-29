@@ -40,6 +40,7 @@ type Proxy struct {
 	connections map[string]Connection
 
 	// external
+	mutex      sync.Mutex
 	ctx        context.Context
 	socket     zmq4.Socket
 	serializer services.ModelSerializer
@@ -69,6 +70,7 @@ func NewServer(
 		servers:     make(map[string]*Server),
 		connections: make(map[string]Connection),
 		serializer:  serializer,
+		mutex:       sync.Mutex{},
 	}
 
 	for _, applyOption := range options {
