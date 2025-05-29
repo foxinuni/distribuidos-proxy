@@ -73,8 +73,10 @@ func (s *Proxy) Start() error {
 	log.Info().Msgf("Starting server on port %d with %d workers", s.port, s.workers)
 
 	// Start the socket
-	s.socket = zmq4.NewRep(context.Background())
-	defer s.socket.Close()
+	s.socket = zmq4.NewRouter(context.Background(),
+		zmq4.WithTimeout(1000*time.Millisecond),
+		zmq4.WithDialerTimeout(1000*time.Millisecond),
+	)
 
 	if err := s.socket.Listen(fmt.Sprintf("tcp://*:%d", s.port)); err != nil {
 		return fmt.Errorf("failed to bind socket: %w", err)
@@ -129,6 +131,11 @@ func (s *Proxy) Stop() {
 
 	// Wait for all workers to finish
 	s.waitgroup.Wait()
+
+	// Stop the socket
+	if s.socket != nil {
+		s.socket.Close()
+	}
 
 	log.Info().Msg("Server shutdown complete.")
 }
