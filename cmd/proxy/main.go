@@ -41,8 +41,8 @@ func main() {
 		handler.WithPort(config.Port),
 		handler.WithWorkerCount(config.Workers),
 		handler.WithServers(
-			"tcp://127.0.0.1:5555",
-			"tcp://127.0.0.1:5556",
+			"tcp://178.156.158.116:5556",
+			"tcp://192.168.0.105:5556",
 		),
 	)
 
