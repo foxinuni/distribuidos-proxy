@@ -40,6 +40,7 @@ type Proxy struct {
 	connections map[string]Connection
 
 	// external
+	ctx        context.Context
 	socket     zmq4.Socket
 	serializer services.ModelSerializer
 }
@@ -48,13 +49,23 @@ func NewServer(
 	serializer services.ModelSerializer,
 	options ...ProxyOptions,
 ) *Proxy {
+	stopch := make(chan struct{})
+
+	// Make context to cancel with channel when stopch
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-stopch
+		cancel()
+	}()
+
 	server := &Proxy{
 		port:        5555,
 		heartbeat:   250 * time.Millisecond,
 		deathtime:   1 * time.Second,
 		workers:     10,
+		ctx:         ctx,
+		stopch:      stopch,
 		requests:    make(chan [][]byte),
-		stopch:      make(chan struct{}),
 		servers:     make(map[string]*Server),
 		connections: make(map[string]Connection),
 		serializer:  serializer,
@@ -73,7 +84,7 @@ func (s *Proxy) Start() error {
 	log.Info().Msgf("Starting server on port %d with %d workers", s.port, s.workers)
 
 	// Start the socket
-	s.socket = zmq4.NewRouter(context.Background(),
+	s.socket = zmq4.NewRouter(s.ctx,
 		zmq4.WithTimeout(1000*time.Millisecond),
 		zmq4.WithDialerTimeout(1000*time.Millisecond),
 	)
@@ -161,47 +172,38 @@ func (s *Proxy) worker(number int) {
 			continue
 		}
 
-		// reply with not implmented error
-		encoded := s.generateErrorResponse(identity, req.ID, req.Type, fmt.Errorf("not implemented"))
-		if err := s.socket.Send(zmq4.NewMsgFrom(encoded...)); err != nil {
-			log.Error().Err(err).Msg("Failed to send error response to client")
+		dealer, err := s.getDealerForConnection(identity)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to get dealer for connection")
+
+			// Send error encoded
+			encoded := s.generateErrorResponse(identity, req.ID, req.Type, fmt.Errorf("failed to get dealer for connection: %w", err))
+			s.socket.Send(zmq4.NewMsgFrom(encoded...))
 			continue
 		}
 
-		/*
-			dealer, err := s.getDealerForConnection(identity)
-			if err != nil {
-				log.Error().Err(err).Msg("Failed to get dealer for connection")
+		// Forward the request to the dealer
+		if err := dealer.Send(zmq4.NewMsgFrom(request[1])); err != nil {
+			log.Error().Err(err).Msgf("Failed to send request to dealer for identity %s", identity)
+			// Send error encoded
+			encoded := s.generateErrorResponse(identity, req.ID, req.Type, fmt.Errorf("failed to send request to dealer: %w", err))
+			s.socket.Send(zmq4.NewMsgFrom(encoded...))
+			continue
+		}
 
-				// Send error encoded
-				encoded := s.generateErrorResponse(identity, req.ID, req.Type, fmt.Errorf("failed to get dealer for connection: %w", err))
-				s.socket.Send(zmq4.NewMsgFrom(encoded...))
-				continue
-			}
+		// Wait for the response from the dealer
+		response, err := dealer.Recv()
+		if err != nil {
+			log.Error().Err(err).Msgf("Failed to receive response from dealer for identity %s", identity)
+			// Send error encoded
+			encoded := s.generateErrorResponse(identity, req.ID, req.Type, fmt.Errorf("failed to receive response from dealer: %w", err))
+			s.socket.Send(zmq4.NewMsgFrom(encoded...))
+			continue
+		}
 
-			// Forward the request to the dealer
-			if err := dealer.Send(zmq4.NewMsgFrom(request[1])); err != nil {
-				log.Error().Err(err).Msgf("Failed to send request to dealer for identity %s", identity)
-				// Send error encoded
-				encoded := s.generateErrorResponse(identity, req.ID, req.Type, fmt.Errorf("failed to send request to dealer: %w", err))
-				s.socket.Send(zmq4.NewMsgFrom(encoded...))
-				continue
-			}
+		log.Debug().Msgf("Received response from dealer (worker: %d, identity: %s, type: %s, id: %d)", number, identity, req.Type, req.ID)
 
-			// Wait for the response from the dealer
-			response, err := dealer.Recv()
-			if err != nil {
-				log.Error().Err(err).Msgf("Failed to receive response from dealer for identity %s", identity)
-				// Send error encoded
-				encoded := s.generateErrorResponse(identity, req.ID, req.Type, fmt.Errorf("failed to receive response from dealer: %w", err))
-				s.socket.Send(zmq4.NewMsgFrom(encoded...))
-				continue
-			}
-
-			log.Debug().Msgf("Received response from dealer (worker: %d, identity: %s, type: %s, id: %d)", number, identity, req.Type, req.ID)
-
-			// Send the response back to the client
-			s.socket.Send(zmq4.NewMsgFrom([][]byte{[]byte(identity), response.Frames[0]}...))
-		*/
+		// Send the response back to the client
+		s.socket.Send(zmq4.NewMsgFrom([][]byte{[]byte(identity), response.Frames[0]}...))
 	}
 }

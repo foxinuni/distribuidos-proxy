@@ -18,11 +18,15 @@ func init() {
 	// Load config from flags
 	flag.IntVar(&config.Port, "port", 4444, "Port to listen on")
 	flag.IntVar(&config.Workers, "workers", runtime.NumCPU(), "Number of worker goroutines")
+	flag.BoolVar(&config.Debug, "debug", false, "Enable debug logging")
 	flag.Parse()
 
 	// Set up zerolog logger for debug and pretty print
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
-	zerolog.SetGlobalLevel(zerolog.DebugLevel)
+
+	if config.Debug {
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	}
 }
 
 func main() {

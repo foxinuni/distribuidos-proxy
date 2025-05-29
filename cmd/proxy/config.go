@@ -1,6 +1,7 @@
 package main
 
 type Config struct {
-	Port        int
-	Workers     int
+	Port    int
+	Workers int
+	Debug   bool
 }

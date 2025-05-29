@@ -27,18 +27,8 @@ func (p *Proxy) registerServers() {
 func (p *Proxy) handleServer(server *Server) {
 	wg := sync.WaitGroup{}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		defer cancel()
-		
-		select {
-		case <-p.stopch:
-		case <-ctx.Done():
-		}
-	}()
-
 	// Dealer gets created to connect to the server
-	dealer := zmq4.NewDealer(ctx,
+	dealer := zmq4.NewDealer(p.ctx,
 		zmq4.WithTimeout(p.deathtime),
 		zmq4.WithDialerTimeout(p.deathtime),
 		zmq4.WithDialerMaxRetries(-1),
