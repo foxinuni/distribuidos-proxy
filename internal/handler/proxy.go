@@ -1,13 +1,15 @@
 package handler
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/foxinuni/distribuidos-proxy/internal/services"
+	"github.com/go-zeromq/zmq4"
 	"github.com/rs/zerolog/log"
-	"gopkg.in/zeromq/goczmq.v4"
 )
 
 type Server struct {
@@ -19,7 +21,8 @@ type Server struct {
 }
 
 type Connection struct {
-	Dealer *goczmq.Channeler
+	Address string
+	Dealer  zmq4.Socket
 }
 
 type Proxy struct {
@@ -34,10 +37,10 @@ type Proxy struct {
 	requests chan [][]byte
 
 	servers     map[string]*Server
-	connections map[string]int
+	connections map[string]Connection
 
 	// external
-	socket     *goczmq.Channeler
+	socket     zmq4.Socket
 	serializer services.ModelSerializer
 }
 
@@ -53,7 +56,7 @@ func NewServer(
 		requests:    make(chan [][]byte),
 		stopch:      make(chan struct{}),
 		servers:     make(map[string]*Server),
-		connections: make(map[string]int),
+		connections: make(map[string]Connection),
 		serializer:  serializer,
 	}
 
@@ -70,13 +73,24 @@ func (s *Proxy) Start() error {
 	log.Info().Msgf("Starting server on port %d with %d workers", s.port, s.workers)
 
 	// Start the socket
-	s.socket = goczmq.NewRouterChanneler(fmt.Sprintf("tcp://*:%d", s.port))
-	if s.socket == nil {
-		return fmt.Errorf("failed to create socket")
+	/*
+		s.socket = goczmq.NewRouterChanneler(fmt.Sprintf("tcp://*:%d", s.port))
+		if s.socket == nil {
+			return fmt.Errorf("failed to create socket")
+		}
+	*/
+	s.socket = zmq4.NewRouter(context.Background(),
+		zmq4.WithTimeout(1000*time.Millisecond),
+	)
+
+	defer s.socket.Close()
+
+	if err := s.socket.Listen(fmt.Sprintf("tcp://*:%d", s.port)); err != nil {
+		return fmt.Errorf("failed to bind socket: %w", err)
 	}
 
 	// Start the workers
-	for i := 0; i < s.workers; i++ {
+	for i := range s.workers {
 		s.waitgroup.Add(1)
 
 		go func() {
@@ -95,10 +109,17 @@ func (s *Proxy) Start() error {
 			case <-s.stopch:
 				log.Warn().Msg("Stop signal received, exiting main loop")
 				return
-			case request := <-s.socket.RecvChan:
-				// Check if the channel is closed
-				// log.Debug().Msgf("Received request from client: %v", request)
-				s.requests <- request
+			default:
+				message, err := s.socket.Recv()
+				if err != nil {
+					if !errors.Is(err, context.Canceled) {
+						log.Error().Err(err).Msg("Failed to receive message from socket")
+					}
+
+					continue
+				}
+
+				s.requests <- message.Frames
 			}
 		}
 	}()
@@ -115,11 +136,6 @@ func (s *Proxy) Stop() {
 
 	// Wait for all workers to finish
 	s.waitgroup.Wait()
-
-	// Shutdown the socket
-	if s.socket != nil {
-		s.socket.Destroy()
-	}
 
 	log.Info().Msg("Server shutdown complete.")
 }
@@ -141,28 +157,42 @@ func (s *Proxy) worker(number int) {
 
 			// Send error encoded
 			encoded := s.generateErrorResponse(identity, req.ID, req.Type, fmt.Errorf("invalid request format: %w", err))
-			s.socket.SendChan <- encoded
+			s.socket.Send(zmq4.NewMsgFrom(encoded...))
 			continue
 		}
 
-		encoded := s.generateErrorResponse(identity, req.ID, req.Type, fmt.Errorf("proxy is currently not processing requests"))
-		s.socket.SendChan <- encoded
+		dealer, err := s.getDealerForConnection(identity)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to get dealer for connection")
 
-		/*
-			// Process the request
-			response, err := s.processRequest(req)
-			if err != nil {
-				log.Error().Err(err).Msg("Failed to process request")
+			// Send error encoded
+			encoded := s.generateErrorResponse(identity, req.ID, req.Type, fmt.Errorf("failed to get dealer for connection: %w", err))
+			s.socket.Send(zmq4.NewMsgFrom(encoded...))
+			continue
+		}
 
-				// Send error encoded
-				encoded := s.generateErrorResponse(identity, req.ID, req.Type, fmt.Errorf("failed to process request: %w", err))
-				s.socket.SendChan <- encoded
-				continue
-			}
+		// Forward the request to the dealer
+		if err := dealer.Send(zmq4.NewMsgFrom(request[1])); err != nil {
+			log.Error().Err(err).Msgf("Failed to send request to dealer for identity %s", identity)
+			// Send error encoded
+			encoded := s.generateErrorResponse(identity, req.ID, req.Type, fmt.Errorf("failed to send request to dealer: %w", err))
+			s.socket.Send(zmq4.NewMsgFrom(encoded...))
+			continue
+		}
 
-			// Send the response
-			encoded := s.generateSuccessResponse(identity, req.ID, req.Type, response)
-			s.socket.SendChan <- encoded
-		*/
+		// Wait for the response from the dealer
+		response, err := dealer.Recv()
+		if err != nil {
+			log.Error().Err(err).Msgf("Failed to receive response from dealer for identity %s", identity)
+			// Send error encoded
+			encoded := s.generateErrorResponse(identity, req.ID, req.Type, fmt.Errorf("failed to receive response from dealer: %w", err))
+			s.socket.Send(zmq4.NewMsgFrom(encoded...))
+			continue
+		}
+
+		log.Debug().Msgf("Received response from dealer (worker: %d, identity: %s, type: %s, id: %d)", number, identity, req.Type, req.ID)
+
+		// Send the response back to the client
+		s.socket.Send(zmq4.NewMsgFrom([][]byte{[]byte(identity), response.Frames[0]}...))
 	}
 }

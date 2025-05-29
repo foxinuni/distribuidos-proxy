@@ -3,6 +3,7 @@ package handler
 import (
 	"fmt"
 	"math/rand"
+	"time"
 
 	"github.com/foxinuni/distribuidos-proxy/internal/models"
 	"github.com/rs/zerolog/log"
@@ -88,4 +89,27 @@ func (s *Proxy) generateHeartbeat() []byte {
 
 	// Send the heartbeat
 	return encoded
+}
+
+func (s *Proxy) restoreOnPanic(fn func()) {
+	for {
+		didPanic := false
+
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Warn().Msgf("Recovered from panic: %v", r)
+					didPanic = true
+					time.Sleep(1 * time.Second) // optional delay before retry
+				}
+			}()
+
+			fn()
+		}()
+
+		if !didPanic {
+			// Function ended normally, no need to retry
+			break
+		}
+	}
 }

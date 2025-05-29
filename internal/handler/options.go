@@ -25,7 +25,7 @@ func WithServers(endpoints ...string) ProxyOptions {
 			c.servers[address] = &Server{
 				Address:  address,
 				Weight:   it,
-				Alive:    true,
+				Alive:    false,
 				LastPong: time.Now(),
 				Mutex:    sync.Mutex{},
 			}

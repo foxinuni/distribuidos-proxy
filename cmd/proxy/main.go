@@ -16,7 +16,7 @@ var config Config
 
 func init() {
 	// Load config from flags
-	flag.IntVar(&config.Port, "port", 5555, "Port to listen on")
+	flag.IntVar(&config.Port, "port", 4444, "Port to listen on")
 	flag.IntVar(&config.Workers, "workers", runtime.NumCPU(), "Number of worker goroutines")
 	flag.Parse()
 
@@ -37,8 +37,8 @@ func main() {
 		handler.WithPort(config.Port),
 		handler.WithWorkerCount(config.Workers),
 		handler.WithServers(
-			"tcp://192.168.0.102:5556",
-			"tcp://192.168.0.102:5557",
+			"tcp://127.0.0.1:5555",
+			"tcp://127.0.0.1:5556",
 		),
 	)
 
