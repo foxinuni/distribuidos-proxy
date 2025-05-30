@@ -13,8 +13,11 @@ import (
 )
 
 var config Config
+var serversConfig *ServersConfig
 
 func init() {
+	var err error
+
 	// Load config from flags
 	flag.IntVar(&config.Port, "port", 4444, "Port to listen on")
 	flag.IntVar(&config.Workers, "workers", runtime.NumCPU(), "Number of worker goroutines")
@@ -26,6 +29,14 @@ func init() {
 
 	if config.Debug {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	} else {
+		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	}
+
+	// Load servers configuration
+	serversConfig, err = GetServersConfig("config/servers.json")
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to load servers configuration")
 	}
 }
 
@@ -40,10 +51,7 @@ func main() {
 		// Optional server options
 		handler.WithPort(config.Port),
 		handler.WithWorkerCount(config.Workers),
-		handler.WithServers(
-			"tcp://178.156.158.116:5556",
-			"tcp://192.168.0.105:5556",
-		),
+		handler.WithServers(serversConfig.Servers...),
 	)
 
 	// 5. Start the server
